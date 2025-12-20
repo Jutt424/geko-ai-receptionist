@@ -20,6 +20,11 @@ const formatCurrency = (value) => {
   return num.toLocaleString("en-US", { style: "currency", currency: "USD" });
 };
 
+const formatPhoneDisplay = (value) => {
+  if (!value) return "—";
+  return String(value).trim().replace(/^\+1\s?/, "");
+};
+
 const Pill = ({ icon: Icon, label, tone = "default" }) => (
   <span
     className={clsx(
@@ -84,7 +89,7 @@ export default function OrderViewModal({ order, onClose }) {
         <div className="max-h-[75vh] space-y-5 overflow-y-auto px-5 py-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {renderRow(User, "Customer", order.customer_name || "Guest")}
-            {renderRow(Phone, "Phone", order.customer_phone || "—")}
+            {renderRow(Phone, "Phone", formatPhoneDisplay(order.customer_phone))}
             {renderRow(Receipt, "Status", (order.status || "pending").toString())}
             {renderRow(
               Truck,

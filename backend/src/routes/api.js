@@ -8,16 +8,20 @@ import {
   createRestaurant,
   listMenu,
   createMenuItem,
+  editMenuItem,
+  deleteMenuItem,
   listClinics,
   createClinic,
   listOrdersByRestaurant,
   updateOrder,
+  deleteOrder,
   listAppointmentsByClinic,
   listPatientsByClinic,
   listCustomersByRestaurant,
   listUpsellsByRestaurant,
   getRestaurantSettings,
   saveRestaurantSettings,
+  refreshRestaurantPrompt,
 } from "../controllers/businessController.js";
 import { listCalls, createOutboundCall } from "../controllers/callController.js";
 import {
@@ -44,8 +48,11 @@ router.get("/restaurants", listRestaurants);
 router.post("/restaurants", authRequired, createRestaurant);
 router.get("/restaurants/:id/menu", listMenu);
 router.post("/restaurants/:id/menu-items", authRequired, requireOrgRole({ paramOrgId: "id", orgModel: "Restaurant", roles: ["owner", "manager"] }), createMenuItem);
+router.patch("/restaurants/:id/menu-items/:itemId", authRequired, requireOrgRole({ paramOrgId: "id", orgModel: "Restaurant", roles: ["owner", "manager"] }), editMenuItem);
+router.delete("/restaurants/:id/menu-items/:itemId", authRequired, requireOrgRole({ paramOrgId: "id", orgModel: "Restaurant", roles: ["owner", "manager"] }), deleteMenuItem);
 router.get("/restaurants/:id/orders", listOrdersByRestaurant);
 router.patch("/restaurants/:id/orders/:orderId", authRequired, requireOrgRole({ paramOrgId: "id", orgModel: "Restaurant", roles: ["owner", "manager"] }), updateOrder);
+router.delete("/restaurants/:id/orders/:orderId", authRequired, requireOrgRole({ paramOrgId: "id", orgModel: "Restaurant", roles: ["owner", "manager"] }), deleteOrder);
 router.get("/restaurants/:id/customers", listCustomersByRestaurant);
 router.get("/restaurants/:id/upsells", listUpsellsByRestaurant);
 router.get(
@@ -59,6 +66,12 @@ router.put(
   authRequired,
   requireOrgRole({ paramOrgId: "id", orgModel: "Restaurant", roles: ["owner", "manager", "staff"] }),
   saveRestaurantSettings,
+);
+router.post(
+  "/restaurants/:id/refresh-prompt",
+  authRequired,
+  requireOrgRole({ paramOrgId: "id", orgModel: "Restaurant", roles: ["owner", "manager", "staff"] }),
+  refreshRestaurantPrompt,
 );
 
 router.get("/clinics", listClinics);
