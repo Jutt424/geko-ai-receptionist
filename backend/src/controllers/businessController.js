@@ -74,6 +74,46 @@ export async function createMenuItem(req, res) {
   res.json({ item: data });
 }
 
+export async function editMenuItem(req, res) {
+  const { id, itemId } = req.params;
+  const { name, description, price, category } = req.body;
+  const { data, error } = await supabase.from("menu_items")
+    .update({ name, description, price, category })
+    .eq("restaurant_id", id)
+    .eq("id", itemId)
+    .select()
+    .single();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ item: data });
+}
+
+export async function deleteMenuItem(req, res) {
+  const { id, itemId } = req.params;
+  
+  if (!id || !itemId) {
+    return res.status(400).json({ error: "Missing restaurantId or itemId" });
+  }
+  const { data, error } = await supabase
+    .from("menu_items")
+    .delete()
+    .eq("id", itemId)
+    .eq("restaurant_id", id)
+    .select()
+    .single();
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  if (!data) {
+    return res.status(404).json({ error: "Menu item not found" });
+  }
+  return res.json({
+    message: "Menu item deleted successfully",
+    item: data
+  });
+}
+
 export async function listClinics(req, res) {
   const { data, error } = await supabase.from("clinics").select("*").order("created_at", { ascending: false });
   if (error) return res.status(500).json({ error: error.message });
@@ -175,6 +215,35 @@ export async function updateOrder(req, res) {
   if (!data) return res.status(404).json({ error: "Order not found" });
 
   res.json({ order: data });
+}
+
+export async function deleteOrder(req, res) {
+  const { id: restaurantId, orderId } = req.params;
+
+  if (!restaurantId || !orderId) {
+    return res.status(400).json({ error: "Missing restaurantId or orderId" });
+  }
+
+  const { data, error } = await supabase
+    .from("orders")
+    .delete()
+    .eq("id", orderId)
+    .eq("restaurant_id", restaurantId)
+    .select()
+    .single();
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  if (!data) {
+    return res.status(404).json({ error: "Order not found" });
+  }
+
+  return res.json({
+    message: "Order deleted successfully",
+    order: data
+  });
 }
 
 export async function listCustomersByRestaurant(req, res) {
@@ -304,4 +373,41 @@ export async function saveRestaurantSettings(req, res) {
       llm_id: updated?.llm_id,
     },
   });
+}
+
+export async function refreshRestaurantPrompt(req, res) {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ error: "restaurant id is required" });
+
+  const { data: restaurant, error } = await supabase
+    .from("restaurants")
+    .select(selectRestaurantBaseFields.join(","))
+    .eq("id", id)
+    .single();
+
+  if (error?.code === "PGRST116") {
+    return res.status(404).json({ error: "Restaurant not found" });
+  }
+  if (error) return res.status(400).json({ error: error.message });
+
+  if (!restaurant?.llm_id) {
+    return res.status(400).json({ error: "Restaurant is missing llm_id" });
+  }
+
+  try {
+    const { updated } = await rebuildRestaurantPrompt(restaurant);
+    return res.json({
+      ok: true,
+      updated,
+      restaurant: {
+        id: restaurant.id,
+        name: restaurant.name,
+        agent_id: restaurant.agent_id,
+        llm_id: restaurant.llm_id,
+      },
+    });
+  } catch (err) {
+    console.error("Failed to refresh restaurant prompt", err?.message || err);
+    return res.status(502).json({ error: "Failed to refresh agent prompt", details: err?.message });
+  }
 }

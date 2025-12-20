@@ -11,16 +11,21 @@ import {
   UtensilsCrossed,
   Star,
   Loader2,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
   useGetRestaurantsQuery,
   useGetRestaurantMenuQuery,
   useCreateMenuItemMutation,
+  useUpdateMenuItemMutation,
+  useDeleteMenuItemMutation,
 } from "../features/api/appApi";
 import { useSelector } from "react-redux";
 import { selectAuth } from "../features/auth/authSlice";
 import { jwtDecode } from "jwt-decode";
+import ConfirmModal from "../components/ui/ConfirmModal";
 
 const CATEGORY_META = {
   Starters: {
@@ -71,6 +76,8 @@ const Menu = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeRestaurantId, setActiveRestaurantId] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingItem, setEditingItem] = useState(null);
+  const [itemToDelete, setItemToDelete] = useState(null);
   const [formData, setFormData] = useState({
     name: "",
     price: "",
@@ -176,6 +183,8 @@ const Menu = () => {
   }, [menuItems, sections]);
 
   const [createMenuItem, { isLoading: createLoading }] = useCreateMenuItemMutation();
+  const [updateMenuItem, { isLoading: updateLoading }] = useUpdateMenuItemMutation();
+  const [deleteMenuItem, { isLoading: deleteLoading }] = useDeleteMenuItemMutation();
 
   const resetForm = () => {
     setFormData({ name: "", price: "", description: "", category: defaultCategory });
@@ -183,10 +192,11 @@ const Menu = () => {
 
   const handleModalClose = () => {
     setIsModalOpen(false);
+    setEditingItem(null);
     resetForm();
   };
 
-  const handleCreateItem = async (event) => {
+  const handleSaveItem = async (event) => {
     event.preventDefault();
     if (!activeRestaurantId) {
       toast.error("Select a restaurant first.");
@@ -205,8 +215,17 @@ const Menu = () => {
     };
 
     try {
-      await createMenuItem({ restaurantId: activeRestaurantId, item: payload }).unwrap();
-      toast.success(`${payload.name} added to ${payload.category}.`);
+      if (editingItem?.id) {
+        await updateMenuItem({
+          restaurantId: activeRestaurantId,
+          itemId: editingItem.id,
+          item: payload,
+        }).unwrap();
+        toast.success(`${payload.name} updated.`);
+      } else {
+        await createMenuItem({ restaurantId: activeRestaurantId, item: payload }).unwrap();
+        toast.success(`${payload.name} added to ${payload.category}.`);
+      }
       handleModalClose();
     } catch (error) {
       const message =
@@ -214,7 +233,41 @@ const Menu = () => {
         error?.data?.message ||
         error?.error ||
         error?.message ||
-        "Unable to create menu item.";
+        `Unable to ${editingItem ? "update" : "create"} menu item.`;
+      toast.error(message);
+    }
+  };
+
+  const handleEditItem = (item) => {
+    setEditingItem(item);
+    setFormData({
+      name: item?.name || "",
+      price: item?.price ?? "",
+      description: item?.description || "",
+      category: item?.category || defaultCategory,
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleDeleteItem = async () => {
+    if (!activeRestaurantId || !itemToDelete?.id) {
+      toast.error("Select a restaurant first.");
+      return;
+    }
+    try {
+      await deleteMenuItem({
+        restaurantId: activeRestaurantId,
+        itemId: itemToDelete.id,
+      }).unwrap();
+      toast.success(`${itemToDelete.name || "Menu item"} deleted.`);
+      setItemToDelete(null);
+    } catch (error) {
+      const message =
+        error?.data?.error ||
+        error?.data?.message ||
+        error?.error ||
+        error?.message ||
+        "Unable to delete menu item.";
       toast.error(message);
     }
   };
@@ -408,8 +461,26 @@ const Menu = () => {
                               ${Number(item.price || 0).toFixed(2)}
                             </span>
                           </div>
-                          <div className="mt-4 text-xs uppercase tracking-wide text-muted">
-                            {section.category}
+                          <div className="mt-4 flex items-center justify-between text-xs uppercase tracking-wide text-muted">
+                            <span>{section.category}</span>
+                            <div className="flex items-center gap-2 opacity-0 transition group-hover:opacity-100">
+                              <button
+                                type="button"
+                                onClick={() => handleEditItem(item)}
+                                className="rounded-full border border-background-hover p-2 text-textcolor-secondary transition hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
+                                aria-label="Edit menu item"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setItemToDelete(item)}
+                                className="rounded-full border border-rose-200 p-2 text-rose-600 transition hover:border-rose-300 hover:bg-rose-50"
+                                aria-label="Delete menu item"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -434,9 +505,11 @@ const Menu = () => {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.3em] text-muted">
-                  New Dish
+                  {editingItem ? "Edit Dish" : "New Dish"}
                 </p>
-                <h2 className="mt-1 text-2xl font-semibold text-primary-dark">Add menu highlight</h2>
+                <h2 className="mt-1 text-2xl font-semibold text-primary-dark">
+                  {editingItem ? "Update menu highlight" : "Add menu highlight"}
+                </h2>
                 <p className="mt-1 text-xs text-textcolor-secondary">
                   These details sync instantly to the AI host and call tools.
                 </p>
@@ -450,7 +523,7 @@ const Menu = () => {
               </button>
             </div>
 
-            <form className="mt-6 space-y-4" onSubmit={handleCreateItem}>
+            <form className="mt-6 space-y-4" onSubmit={handleSaveItem}>
               <div className="grid gap-4 sm:grid-cols-2">
                 <label className="flex flex-col gap-1 text-sm text-primary-dark/90">
                   Dish name
@@ -533,14 +606,29 @@ const Menu = () => {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn-primary sm:w-auto" disabled={createLoading}>
-                  {createLoading ? "Saving…" : "Save menu item"}
+                <button
+                  type="submit"
+                  className="btn-primary sm:w-auto"
+                  disabled={createLoading || updateLoading}
+                >
+                  {createLoading || updateLoading ? "Saving…" : "Save menu item"}
                 </button>
               </div>
             </form>
           </div>
         </div>
       ) : null}
+      <ConfirmModal
+        open={Boolean(itemToDelete)}
+        title="Delete menu item?"
+        message={`Delete ${itemToDelete?.name || "this item"}? This action cannot be undone.`}
+        confirmLabel="Delete item"
+        cancelLabel="Cancel"
+        onConfirm={handleDeleteItem}
+        onCancel={() => setItemToDelete(null)}
+        loading={deleteLoading}
+        variant="danger"
+      />
     </div>
   );
 };

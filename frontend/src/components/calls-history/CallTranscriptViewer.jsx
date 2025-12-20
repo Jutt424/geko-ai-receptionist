@@ -66,8 +66,8 @@ export default function CallTranscriptViewer({ call, onClose }) {
   const sentimentValue = sentiment || transcript_object?.sentiment;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
-      <div className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl bg-white shadow-xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-sm px-4">
+      <div className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl">
         <div className="flex items-start justify-between border-b border-neutral-200 p-5">
           <div>
             <div className="flex items-center gap-2 text-sm text-neutral-500">
@@ -88,14 +88,14 @@ export default function CallTranscriptViewer({ call, onClose }) {
           </button>
         </div>
 
-        <div className="space-y-5 overflow-y-auto p-5">
-          <Section title="Summary">
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
+          {/* <Section title="Summary">
             {summary ? <p>{summary}</p> : <p className="text-neutral-500">No summary available.</p>}
-          </Section>
+          </Section> */}
 
-          <Section title="Sentiment">
+          {/* <Section title="Sentiment">
             {sentimentValue ? <p>{sentimentValue}</p> : <p className="text-neutral-500">No sentiment data.</p>}
-          </Section>
+          </Section> */}
 
           <Section title="Transcript">
             {formatTranscript(transcript,)}

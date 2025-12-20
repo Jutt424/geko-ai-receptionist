@@ -231,28 +231,82 @@ export async function toolGetRestaurantCustomerByPhone(req, res) {
     const body = normalizeRequestBody(req);
     const callPayload = body?.call || {};
     const metadataPayload = callPayload?.metadata || body?.metadata || {};
+    const callDirection = String(
+      callPayload?.direction || metadataPayload?.direction || body?.direction || body?.call?.direction || "",
+    ).toLowerCase();
+
+    const preferredPhone =
+      callDirection === "outbound"
+        ? parameters.caller_phone ||
+          parameters.to_number ||
+          parameters.toNumber ||
+          body?.to_number ||
+          body?.toNumber ||
+          body?.metadata?.to_number ||
+          body?.metadata?.toNumber ||
+          callPayload?.to_number ||
+          callPayload?.toNumber ||
+          callPayload?.metadata?.to_number ||
+          callPayload?.metadata?.toNumber ||
+          metadataPayload?.to_number ||
+          metadataPayload?.toNumber ||
+          metadataPayload?.caller_phone ||
+          body?.metadata?.caller_phone ||
+          null
+        : parameters.caller_phone ||
+          parameters.from_number ||
+          parameters.fromNumber ||
+          body?.from_number ||
+          body?.fromNumber ||
+          body?.metadata?.from_number ||
+          body?.metadata?.fromNumber ||
+          callPayload?.from_number ||
+          callPayload?.fromNumber ||
+          callPayload?.metadata?.from_number ||
+          callPayload?.metadata?.fromNumber ||
+          metadataPayload?.from_number ||
+          metadataPayload?.fromNumber ||
+          metadataPayload?.caller_phone ||
+          body?.metadata?.caller_phone ||
+          null;
 
     const phoneHints = [
       parameters.caller_phone,
       parameters.customer_phone,
       parameters.phone,
       parameters.from_number,
+      parameters.fromNumber,
       parameters.to_number,
+      parameters.toNumber,
       body?.caller_phone,
       body?.customer_phone,
       body?.phone,
       body?.from_number,
+      body?.fromNumber,
       body?.to_number,
+      body?.toNumber,
       body?.metadata?.caller_phone,
       body?.metadata?.from_number,
+      body?.metadata?.fromNumber,
+      body?.metadata?.to_number,
+      body?.metadata?.toNumber,
       callPayload?.caller_phone,
       callPayload?.from_number,
+      callPayload?.fromNumber,
       callPayload?.to_number,
+      callPayload?.toNumber,
+      callPayload?.metadata?.from_number,
+      callPayload?.metadata?.fromNumber,
+      callPayload?.metadata?.to_number,
+      callPayload?.metadata?.toNumber,
       metadataPayload?.caller_phone,
       metadataPayload?.from_number,
+      metadataPayload?.fromNumber,
+      metadataPayload?.to_number,
+      metadataPayload?.toNumber,
     ].filter((value) => typeof value === "string" && value.trim());
 
-    const rawCallerPhone = phoneHints[0];
+    const rawCallerPhone = preferredPhone || phoneHints[0];
     if (!rawCallerPhone) {
       return respondError(res, "caller_phone is required");
     }
@@ -606,7 +660,7 @@ export async function toolPlaceOrder(req, res) {
     const agentId = resolveAgentId();
 
     const resolveCustomerPhone = async () => {
-      let phoneCandidate =
+      const directPhone =
         customer.phone ||
         parameters.customer_phone ||
         parameters.customerPhone ||
@@ -614,32 +668,67 @@ export async function toolPlaceOrder(req, res) {
         parameters.contact_phone ||
         parameters.caller_phone ||
         parameters.callerPhone ||
-        parameters.from_number ||
-        parameters.to_number ||
         body?.customer_phone ||
         body?.caller_phone ||
         body?.metadata?.caller_phone ||
-        body?.metadata?.from_number ||
         body?.metadata?.phone_number ||
         body?.call?.customer?.phone ||
-        body?.call?.from_number ||
-        body?.call?.to_number ||
         body?.call?.metadata?.caller_phone ||
-        body?.call?.metadata?.from_number ||
         null;
 
+      if (directPhone) return directPhone;
+
+      const fromNumber =
+        parameters.from_number ||
+        parameters.fromNumber ||
+        body?.from_number ||
+        body?.fromNumber ||
+        body?.metadata?.from_number ||
+        body?.metadata?.fromNumber ||
+        callPayload?.from_number ||
+        callPayload?.fromNumber ||
+        callPayload?.metadata?.from_number ||
+        callPayload?.metadata?.fromNumber ||
+        metadataPayload?.from_number ||
+        metadataPayload?.fromNumber ||
+        null;
+
+      const toNumber =
+        parameters.to_number ||
+        parameters.toNumber ||
+        body?.to_number ||
+        body?.toNumber ||
+        callPayload?.to_number ||
+        callPayload?.toNumber ||
+        callPayload?.metadata?.to_number ||
+        callPayload?.metadata?.toNumber ||
+        metadataPayload?.to_number ||
+        metadataPayload?.toNumber ||
+        null;
+
+      const callDirection = String(
+        callPayload?.direction || metadataPayload?.direction || body?.direction || body?.call?.direction || "",
+      ).toLowerCase();
+
+      if (callDirection === "outbound" && toNumber) return toNumber;
+      if (callDirection === "inbound" && fromNumber) return fromNumber;
+
+      const phoneCandidate = fromNumber || toNumber || null;
       if (phoneCandidate) return phoneCandidate;
 
       const callId = findCallId();
       if (callId && retellClient?.call?.retrieve) {
         try {
           const callDetails = await retellClient.call.retrieve(callId);
-          phoneCandidate = callDetails?.from_number || callDetails?.to_number || null;
+          const fallbackFrom = callDetails?.from_number || null;
+          const fallbackTo = callDetails?.to_number || null;
+          if (callDirection === "outbound") return fallbackTo || fallbackFrom;
+          return fallbackFrom || fallbackTo;
         } catch (error) {
           console.warn("Failed to fetch call details for phone fallback", error?.message || error);
         }
       }
-      return phoneCandidate;
+      return null;
     };
 
     const customerPhone = await resolveCustomerPhone();

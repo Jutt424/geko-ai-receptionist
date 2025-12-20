@@ -74,7 +74,7 @@ export const registerOwner = createAsyncThunk(
   "auth/registerOwner",
   async (payload, { rejectWithValue }) => {
     try {
-      const { data } = await api.post("/auth/register-owner", payload);
+      const { data } = await api.post("/auth/register-owner", payload, { timeout: 60000 });
       if (!data) {
         throw new Error("Empty response from server");
       }

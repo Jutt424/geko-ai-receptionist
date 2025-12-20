@@ -44,6 +44,25 @@ export const appApi = createApi({
         { type: "Menu", id: restaurantId },
       ],
     }),
+    updateMenuItem: builder.mutation({
+      query: ({ restaurantId, itemId, item }) => ({
+        url: `/restaurants/${restaurantId}/menu-items/${itemId}`,
+        method: "PATCH",
+        data: item,
+      }),
+      invalidatesTags: (result, error, { restaurantId }) => [
+        { type: "Menu", id: restaurantId },
+      ],
+    }),
+    deleteMenuItem: builder.mutation({
+      query: ({ restaurantId, itemId }) => ({
+        url: `/restaurants/${restaurantId}/menu-items/${itemId}`,
+        method: "DELETE",
+      }),
+      invalidatesTags: (result, error, { restaurantId }) => [
+        { type: "Menu", id: restaurantId },
+      ],
+    }),
 
     getRestaurantOrders: builder.query({
       query: (restaurantId) => ({ url: `/restaurants/${restaurantId}/orders` }),
@@ -62,6 +81,15 @@ export const appApi = createApi({
           data: updates,
         };
       },
+      invalidatesTags: (result, error, { restaurantId }) => [
+        { type: "Orders", id: restaurantId },
+      ],
+    }),
+    deleteOrder: builder.mutation({
+      query: ({ restaurantId, orderId }) => ({
+        url: `/restaurants/${restaurantId}/orders/${orderId}`,
+        method: "DELETE",
+      }),
       invalidatesTags: (result, error, { restaurantId }) => [
         { type: "Orders", id: restaurantId },
       ],
@@ -98,6 +126,15 @@ export const appApi = createApi({
         data: settings,
       }),
       invalidatesTags: (result, error, { restaurantId }) => [
+        { type: "RestaurantSettings", id: restaurantId },
+      ],
+    }),
+    refreshRestaurantPrompt: builder.mutation({
+      query: (restaurantId) => ({
+        url: `/restaurants/${restaurantId}/refresh-prompt`,
+        method: "POST",
+      }),
+      invalidatesTags: (result, error, restaurantId) => [
         { type: "RestaurantSettings", id: restaurantId },
       ],
     }),
@@ -302,12 +339,16 @@ export const {
   useGetRestaurantsQuery,
   useGetRestaurantMenuQuery,
   useCreateMenuItemMutation,
+  useUpdateMenuItemMutation,
+  useDeleteMenuItemMutation,
   useGetRestaurantOrdersQuery,
   useUpdateOrderStatusMutation,
+  useDeleteOrderMutation,
   useGetRestaurantCustomersQuery,
   useGetRestaurantUpsellsQuery,
   useGetRestaurantAiSettingsQuery,
   useSaveRestaurantAiSettingsMutation,
+  useRefreshRestaurantPromptMutation,
   // Voices
   useGetVoicesQuery,
   // Agents

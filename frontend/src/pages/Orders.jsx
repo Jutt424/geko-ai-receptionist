@@ -5,6 +5,7 @@ import {
   useGetRestaurantsQuery,
   useGetRestaurantOrdersQuery,
   useUpdateOrderStatusMutation,
+  useDeleteOrderMutation,
 } from "../features/api/appApi";
 import { selectAuth } from "../features/auth/authSlice";
 import {
@@ -16,10 +17,12 @@ import {
   CheckCircle2,
   Eye,
   Pencil,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import OrderViewModal from "../components/orders/OrderViewModal";
 import OrderEditModal from "../components/orders/OrderEditModal";
+import ConfirmModal from "../components/ui/ConfirmModal";
 
 const DEFAULT_BADGE = "Restaurant";
 
@@ -48,6 +51,8 @@ const OrdersPage = () => {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [updatingOrderId, setUpdatingOrderId] = useState(null);
   const [editingOrder, setEditingOrder] = useState(null);
+  const [deletingOrderId, setDeletingOrderId] = useState(null);
+  const [orderToDelete, setOrderToDelete] = useState(null);
 
   const preferredRestaurantId = useMemo(() => {
     if (!token) return null;
@@ -83,6 +88,7 @@ const OrdersPage = () => {
     isFetching: ordersFetching,
   } = useGetRestaurantOrdersQuery(activeRestaurantId, { skip: !activeRestaurantId });
   const [updateOrderStatus, { isLoading: updatingStatus }] = useUpdateOrderStatusMutation();
+  const [deleteOrder, { isLoading: deletingOrder }] = useDeleteOrderMutation();
 
   const filteredOrders = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
@@ -171,6 +177,25 @@ const OrdersPage = () => {
     }
   };
 
+  const handleDeleteOrder = async () => {
+    if (!orderToDelete) return;
+    if (!activeRestaurantId) {
+      toast.error("Select a restaurant first.");
+      return;
+    }
+    setDeletingOrderId(orderToDelete.id);
+    try {
+      await deleteOrder({ restaurantId: activeRestaurantId, orderId: orderToDelete.id }).unwrap();
+      toast.success("Order deleted.");
+      setOrderToDelete(null);
+    } catch (err) {
+      const message = err?.data?.error || err?.data || err?.message || "Failed to delete order.";
+      toast.error(message);
+    } finally {
+      setDeletingOrderId(null);
+    }
+  };
+
   const renderTable = () => {
     if (ordersLoading && !orders.length) {
       return (
@@ -251,6 +276,18 @@ const OrdersPage = () => {
                       <Eye className="h-4 w-4" />
                       View
                     </button>
+                    <button
+                      onClick={() => setOrderToDelete(order)}
+                      disabled={deletingOrder && deletingOrderId === order.id}
+                      className="inline-flex items-center gap-2 rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-medium text-rose-600 transition hover:border-rose-300 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      aria-label="Delete order"
+                    >
+                      {deletingOrder && deletingOrderId === order.id ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4" />
+                      )}
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -326,6 +363,17 @@ const OrdersPage = () => {
         onClose={() => setEditingOrder(null)}
         onSave={handleSaveEdit}
         saving={updatingStatus && editingOrder ? updatingOrderId === editingOrder.id : false}
+      />
+      <ConfirmModal
+        open={Boolean(orderToDelete)}
+        title="Delete order?"
+        message={`Delete order for ${orderToDelete?.customer_name || "Guest"}? This action cannot be undone.`}
+        confirmLabel="Delete order"
+        cancelLabel="Cancel"
+        loading={deletingOrder && deletingOrderId === orderToDelete?.id}
+        onConfirm={handleDeleteOrder}
+        onCancel={() => setOrderToDelete(null)}
+        variant="danger"
       />
     </div>
   );
