@@ -144,6 +144,12 @@ export const appApi = createApi({
         { type: "RestaurantSettings", id: restaurantId },
       ],
     }),
+    refreshRestaurantTools: builder.mutation({
+      query: (restaurantId) => ({
+        url: `/restaurants/${restaurantId}/refresh-tools`,
+        method: "POST",
+      }),
+    }),
 
     // ============ VOICES ============
     getVoices: builder.query({
@@ -365,6 +371,8 @@ export const {
   // Prompts
   useGetPromptsQuery,
   useCreatePromptMutation,
+  // Tools
+  useRefreshRestaurantToolsMutation,
   // Calls
   useGetCallsQuery,
   useCreateCallMutation,
