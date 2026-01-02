@@ -23,7 +23,7 @@ const PUBLIC_BASE_RAW =
   "";
 const PUBLIC_BASE = PUBLIC_BASE_RAW.replace(/\/$/, "");
 
-async function rebuildRestaurantPrompt(restaurant, overrideSettings = {}, options = {}) {
+async function rebuildRestaurantPrompt(restaurant, overrideSettings = {}) {
   if (!restaurant?.id || !restaurant.llm_id) {
     return { updated: false };
   }
@@ -49,26 +49,32 @@ async function rebuildRestaurantPrompt(restaurant, overrideSettings = {}, option
     settings,
   });
 
-  const updatePayload = { general_prompt };
-  const includeTools = options?.includeTools === true;
+  await retellClient.llm.update(restaurant.llm_id, { general_prompt });
+  return { updated: true };
+}
 
-  if (includeTools) {
-    const baseUrl = PUBLIC_BASE || process.env.API_BASE_URL || "http://localhost:3300";
-    updatePayload.general_tools = buildRetellTools({
-      baseUrl,
-      secret: process.env.RETELL_TOOL_SECRET,
-      orgType: "Restaurant",
-    });
-    updatePayload.tool_call_strict_mode = true;
-    updatePayload.default_dynamic_variables = {
+async function rebuildRestaurantTools(restaurant) {
+  if (!restaurant?.id || !restaurant.llm_id) {
+    return { updated: false };
+  }
+
+  const baseUrl = PUBLIC_BASE || process.env.API_BASE_URL || "http://localhost:3300";
+  const general_tools = buildRetellTools({
+    baseUrl,
+    secret: process.env.RETELL_TOOL_SECRET,
+    orgType: "Restaurant",
+  });
+
+  await retellClient.llm.update(restaurant.llm_id, {
+    general_tools,
+    tool_call_strict_mode: true,
+    default_dynamic_variables: {
       restaurant_id: restaurant.id,
       restaurant_name: restaurant.name,
       restaurant_phone: restaurant.phone,
-    };
-  }
-
-  await retellClient.llm.update(restaurant.llm_id, updatePayload);
-  return { updated: true, toolsUpdated: includeTools };
+    },
+  });
+  return { updated: true };
 }
 
 export async function listRestaurants(req, res) {
@@ -423,15 +429,10 @@ export async function refreshRestaurantPrompt(req, res) {
   }
 
   try {
-    const { updated, toolsUpdated } = await rebuildRestaurantPrompt(
-      restaurant,
-      {},
-      { includeTools: true },
-    );
+    const { updated } = await rebuildRestaurantPrompt(restaurant);
     return res.json({
       ok: true,
       updated,
-      toolsUpdated,
       restaurant: {
         id: restaurant.id,
         name: restaurant.name,
@@ -442,5 +443,42 @@ export async function refreshRestaurantPrompt(req, res) {
   } catch (err) {
     console.error("Failed to refresh restaurant prompt", err?.message || err);
     return res.status(502).json({ error: "Failed to refresh agent prompt", details: err?.message });
+  }
+}
+
+export async function refreshRestaurantTools(req, res) {
+  const { id } = req.params;
+  if (!id) return res.status(400).json({ error: "restaurant id is required" });
+
+  const { data: restaurant, error } = await supabase
+    .from("restaurants")
+    .select(selectRestaurantBaseFields.join(","))
+    .eq("id", id)
+    .single();
+
+  if (error?.code === "PGRST116") {
+    return res.status(404).json({ error: "Restaurant not found" });
+  }
+  if (error) return res.status(400).json({ error: error.message });
+
+  if (!restaurant?.llm_id) {
+    return res.status(400).json({ error: "Restaurant is missing llm_id" });
+  }
+
+  try {
+    const { updated } = await rebuildRestaurantTools(restaurant);
+    return res.json({
+      ok: true,
+      updated,
+      restaurant: {
+        id: restaurant.id,
+        name: restaurant.name,
+        agent_id: restaurant.agent_id,
+        llm_id: restaurant.llm_id,
+      },
+    });
+  } catch (err) {
+    console.error("Failed to refresh restaurant tools", err?.message || err);
+    return res.status(502).json({ error: "Failed to refresh agent tools", details: err?.message });
   }
 }

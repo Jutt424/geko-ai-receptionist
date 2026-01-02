@@ -22,6 +22,7 @@ import {
   getRestaurantSettings,
   saveRestaurantSettings,
   refreshRestaurantPrompt,
+  refreshRestaurantTools,
 } from "../controllers/businessController.js";
 import { listCalls, createOutboundCall } from "../controllers/callController.js";
 import {
@@ -72,6 +73,12 @@ router.post(
   authRequired,
   requireOrgRole({ paramOrgId: "id", orgModel: "Restaurant", roles: ["owner", "manager", "staff"] }),
   refreshRestaurantPrompt,
+);
+router.post(
+  "/restaurants/:id/refresh-tools",
+  authRequired,
+  requireOrgRole({ paramOrgId: "id", orgModel: "Restaurant", roles: ["owner", "manager", "staff"] }),
+  refreshRestaurantTools,
 );
 
 router.get("/clinics", listClinics);
