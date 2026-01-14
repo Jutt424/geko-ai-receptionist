@@ -424,6 +424,11 @@ export async function handleInboundCallWebhook(req, res) {
 
     return res.json({
       call_inbound: {
+        agent_override: {
+          retell_llm: {
+            begin_message: openingLine,
+          },
+        },
         dynamic_variables: {
           opening_line: openingLine,
           customer_name: resolvedName || "",
