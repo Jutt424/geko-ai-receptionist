@@ -283,6 +283,169 @@ const logRestaurantUpsell = async ({
   }
 };
 
+const ORDER_STATUSES = new Set([
+  "pending",
+  "confirmed",
+  "preparing",
+  "ready",
+  "completed",
+  "cancelled",
+  "out_for_delivery",
+  "delivered",
+]);
+const ORDER_FULFILLMENT = new Set(["pickup", "delivery"]);
+
+const resolveOrderForAction = async ({ restaurantId, parameters, body }) => {
+  const callPayload = body?.call || {};
+  const metadataPayload = callPayload?.metadata || body?.metadata || {};
+  const callDirection = String(
+    callPayload?.direction || metadataPayload?.direction || body?.direction || body?.call?.direction || "",
+  ).toLowerCase();
+
+  const orderId =
+    parameters.order_id ||
+    parameters.orderId ||
+    parameters.id ||
+    body?.order_id ||
+    body?.orderId ||
+    null;
+
+  const directPhone = pickPhone(
+    parameters.customer_phone,
+    parameters.customerPhone,
+    parameters.phone,
+    body?.customer_phone,
+    body?.customerPhone,
+    body?.phone,
+    body?.caller_phone,
+    body?.callerPhone,
+    body?.metadata?.caller_phone,
+    body?.metadata?.from_number,
+    body?.metadata?.fromNumber,
+    body?.metadata?.to_number,
+    body?.metadata?.toNumber,
+    metadataPayload?.caller_phone,
+    metadataPayload?.from_number,
+    metadataPayload?.fromNumber,
+    metadataPayload?.to_number,
+    metadataPayload?.toNumber,
+  );
+
+  const fromNumber = pickPhone(
+    parameters.from_number,
+    parameters.fromNumber,
+    body?.from_number,
+    body?.fromNumber,
+    callPayload?.from_number,
+    callPayload?.fromNumber,
+    callPayload?.metadata?.from_number,
+    callPayload?.metadata?.fromNumber,
+    metadataPayload?.from_number,
+    metadataPayload?.fromNumber,
+  );
+
+  const toNumber = pickPhone(
+    parameters.to_number,
+    parameters.toNumber,
+    body?.to_number,
+    body?.toNumber,
+    callPayload?.to_number,
+    callPayload?.toNumber,
+    callPayload?.metadata?.to_number,
+    callPayload?.metadata?.toNumber,
+    metadataPayload?.to_number,
+    metadataPayload?.toNumber,
+  );
+
+  let customerPhone = directPhone;
+  if (!customerPhone) {
+    if (callDirection === "outbound" && toNumber) {
+      customerPhone = toNumber;
+    } else if (callDirection === "inbound" && fromNumber) {
+      customerPhone = fromNumber;
+    } else {
+      customerPhone = fromNumber || toNumber || null;
+    }
+  }
+
+  if (!customerPhone) {
+    const callId =
+      parameters.call_id ||
+      parameters.callId ||
+      body?.call_id ||
+      body?.call?.call_id ||
+      body?.call?.id ||
+      null;
+    if (callId && retellClient?.call?.retrieve) {
+      try {
+        const callDetails = await retellClient.call.retrieve(callId);
+        const fallbackFrom = sanitizePhoneInput(callDetails?.from_number);
+        const fallbackTo = sanitizePhoneInput(callDetails?.to_number);
+        if (callDirection === "outbound") {
+          customerPhone = fallbackTo || fallbackFrom || null;
+        } else {
+          customerPhone = fallbackFrom || fallbackTo || null;
+        }
+      } catch (error) {
+        console.warn("Failed to fetch call details for order lookup", error?.message || error);
+      }
+    }
+  }
+
+  if (!orderId && !customerPhone) {
+    return { order: null, orderId: null, customerPhone: null };
+  }
+
+  let query = supabase.from("orders").select("*").eq("restaurant_id", restaurantId);
+  if (orderId) {
+    query = query.eq("id", orderId);
+  } else if (customerPhone) {
+    const phoneCandidates = collectPhoneCandidates(
+      customerPhone,
+      directPhone,
+      fromNumber,
+      toNumber,
+      parameters.customer_phone,
+      parameters.customerPhone,
+      parameters.phone,
+      body?.customer_phone,
+      body?.customerPhone,
+      body?.phone,
+    );
+    if (phoneCandidates.length) {
+      query = query.in("customer_phone", phoneCandidates);
+    } else {
+      query = query.eq("customer_phone", customerPhone);
+    }
+    query = query.order("created_at", { ascending: false });
+  }
+  query = query.limit(1);
+
+  let { data, error } = await query.maybeSingle();
+  if (error && error.code !== "PGRST116") {
+    throw new Error(error.message);
+  }
+  if (!data && !orderId && customerPhone) {
+    const digits = normalizeDigits(customerPhone);
+    if (digits) {
+      const { data: fallback, error: fallbackError } = await supabase
+        .from("orders")
+        .select("*")
+        .eq("restaurant_id", restaurantId)
+        .ilike("customer_phone", `%${digits}%`)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (fallbackError && fallbackError.code !== "PGRST116") {
+        throw new Error(fallbackError.message);
+      }
+      data = fallback || null;
+    }
+  }
+
+  return { order: data || null, orderId, customerPhone };
+};
+
 export async function toolGetRestaurantCustomerByPhone(req, res) {
   try {
     const parameters = extractParameters(req);
@@ -1026,13 +1189,108 @@ export async function toolPlaceOrder(req, res) {
 export async function toolGetOrderStatus(req, res) {
   try {
     const parameters = extractParameters(req);
+    const body = normalizeRequestBody(req);
+    const callPayload = body?.call || {};
+    const metadataPayload = callPayload?.metadata || body?.metadata || {};
     const { restaurantId } = await resolveRestaurantContext(req, parameters.restaurant_id);
     if (!restaurantId) {
       return respondError(res, "restaurant_id could not be resolved", "BAD_REQUEST");
     }
 
-    const orderId = parameters.order_id || parameters.id;
-    const customerPhone = parameters.customer_phone || parameters.phone;
+    const orderId =
+      parameters.order_id ||
+      parameters.orderId ||
+      parameters.id ||
+      body?.order_id ||
+      body?.orderId ||
+      null;
+
+    const callDirection = String(
+      callPayload?.direction || metadataPayload?.direction || body?.direction || body?.call?.direction || "",
+    ).toLowerCase();
+
+    const directPhone = pickPhone(
+      parameters.customer_phone,
+      parameters.customerPhone,
+      parameters.phone,
+      body?.customer_phone,
+      body?.customerPhone,
+      body?.phone,
+      body?.caller_phone,
+      body?.callerPhone,
+      body?.metadata?.caller_phone,
+      body?.metadata?.from_number,
+      body?.metadata?.fromNumber,
+      body?.metadata?.to_number,
+      body?.metadata?.toNumber,
+      metadataPayload?.caller_phone,
+      metadataPayload?.from_number,
+      metadataPayload?.fromNumber,
+      metadataPayload?.to_number,
+      metadataPayload?.toNumber,
+    );
+
+    const fromNumber = pickPhone(
+      parameters.from_number,
+      parameters.fromNumber,
+      body?.from_number,
+      body?.fromNumber,
+      callPayload?.from_number,
+      callPayload?.fromNumber,
+      callPayload?.metadata?.from_number,
+      callPayload?.metadata?.fromNumber,
+      metadataPayload?.from_number,
+      metadataPayload?.fromNumber,
+    );
+
+    const toNumber = pickPhone(
+      parameters.to_number,
+      parameters.toNumber,
+      body?.to_number,
+      body?.toNumber,
+      callPayload?.to_number,
+      callPayload?.toNumber,
+      callPayload?.metadata?.to_number,
+      callPayload?.metadata?.toNumber,
+      metadataPayload?.to_number,
+      metadataPayload?.toNumber,
+    );
+
+    let customerPhone = directPhone;
+    if (!customerPhone) {
+      if (callDirection === "outbound" && toNumber) {
+        customerPhone = toNumber;
+      } else if (callDirection === "inbound" && fromNumber) {
+        customerPhone = fromNumber;
+      } else {
+        customerPhone = fromNumber || toNumber || null;
+      }
+    }
+
+    if (!customerPhone) {
+      const callId =
+        parameters.call_id ||
+        parameters.callId ||
+        body?.call_id ||
+        body?.call?.call_id ||
+        body?.call?.id ||
+        null;
+      if (callId && retellClient?.call?.retrieve) {
+        try {
+          const callDetails = await retellClient.call.retrieve(callId);
+          const fallbackFrom = sanitizePhoneInput(callDetails?.from_number);
+          const fallbackTo = sanitizePhoneInput(callDetails?.to_number);
+          if (callDirection === "outbound") {
+            customerPhone = fallbackTo || fallbackFrom || null;
+          } else {
+            customerPhone = fallbackFrom || fallbackTo || null;
+          }
+        } catch (error) {
+          console.warn("Failed to fetch call details for order status", error?.message || error);
+        }
+      }
+    }
+
     if (!orderId && !customerPhone) {
       return respondError(res, "order_id or customer_phone is required");
     }
@@ -1041,19 +1299,274 @@ export async function toolGetOrderStatus(req, res) {
     if (orderId) {
       query = query.eq("id", orderId);
     } else if (customerPhone) {
-      query = query.eq("customer_phone", customerPhone).order("created_at", { ascending: false });
+      const phoneCandidates = collectPhoneCandidates(
+        customerPhone,
+        directPhone,
+        fromNumber,
+        toNumber,
+        parameters.customer_phone,
+        parameters.customerPhone,
+        parameters.phone,
+        body?.customer_phone,
+        body?.customerPhone,
+        body?.phone,
+      );
+      if (phoneCandidates.length) {
+        query = query.in("customer_phone", phoneCandidates);
+      } else {
+        query = query.eq("customer_phone", customerPhone);
+      }
+      query = query.order("created_at", { ascending: false });
     }
     query = query.limit(1);
 
-    const { data, error } = await query.maybeSingle();
+    let { data, error } = await query.maybeSingle();
     if (error && error.code !== "PGRST116") {
       throw new Error(error.message);
+    }
+    if (!data && !orderId && customerPhone) {
+      const digits = normalizeDigits(customerPhone);
+      if (digits) {
+        const { data: fallback, error: fallbackError } = await supabase
+          .from("orders")
+          .select("*")
+          .eq("restaurant_id", restaurantId)
+          .ilike("customer_phone", `%${digits}%`)
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (fallbackError && fallbackError.code !== "PGRST116") {
+          throw new Error(fallbackError.message);
+        }
+        data = fallback || null;
+      }
     }
     if (!data) {
       return respondError(res, "Order not found", "NOT_FOUND");
     }
 
     return res.json({ success: true, order: data });
+  } catch (error) {
+    return respondError(res, error.message, "SERVER_ERROR");
+  }
+}
+
+export async function toolUpdateOrder(req, res) {
+  try {
+    const parameters = extractParameters(req);
+    const body = normalizeRequestBody(req);
+    const { restaurantId } = await resolveRestaurantContext(req, parameters.restaurant_id);
+    if (!restaurantId) {
+      return respondError(res, "restaurant_id could not be resolved", "BAD_REQUEST");
+    }
+
+    const { order, orderId, customerPhone } = await resolveOrderForAction({
+      restaurantId,
+      parameters,
+      body,
+    });
+    if (!order) {
+      return respondError(res, "Order not found", "NOT_FOUND");
+    }
+
+    const updates = {};
+    const rawStatus =
+      parameters.status ||
+      body?.status ||
+      null;
+    if (rawStatus !== null && rawStatus !== undefined) {
+      const normalizedStatus = String(rawStatus).trim().toLowerCase();
+      const mappedStatus = normalizedStatus === "cancel" ? "cancelled" : normalizedStatus;
+      if (!ORDER_STATUSES.has(mappedStatus)) {
+        return respondError(res, "Unsupported status value", "BAD_REQUEST");
+      }
+      updates.status = mappedStatus;
+    }
+
+    const rawFulfillment =
+      parameters.delivery_or_pickup ||
+      parameters.fulfillment ||
+      body?.delivery_or_pickup ||
+      body?.fulfillment ||
+      null;
+    if (rawFulfillment !== null && rawFulfillment !== undefined) {
+      const fulfillment = String(rawFulfillment).trim().toLowerCase();
+      if (!ORDER_FULFILLMENT.has(fulfillment)) {
+        return respondError(res, "delivery_or_pickup must be delivery or pickup", "BAD_REQUEST");
+      }
+      updates.delivery_or_pickup = fulfillment;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(parameters, "delivery_address") ||
+        Object.prototype.hasOwnProperty.call(parameters, "address") ||
+        Object.prototype.hasOwnProperty.call(body || {}, "delivery_address") ||
+        Object.prototype.hasOwnProperty.call(body || {}, "address")) {
+      updates.delivery_address =
+        parameters.delivery_address ||
+        parameters.address ||
+        body?.delivery_address ||
+        body?.address ||
+        null;
+    }
+
+    const items = Array.isArray(parameters.items)
+      ? parameters.items
+      : Array.isArray(body?.items)
+        ? body.items
+        : null;
+    if (items) {
+      if (!items.length) {
+        return respondError(res, "items array is required when updating items");
+      }
+
+      const { data: menuRows = [], error: menuError } = await supabase
+        .from("menu_items")
+        .select("id, name, price, category")
+        .eq("restaurant_id", restaurantId);
+      if (menuError) throw new Error(menuError.message);
+
+      const menuById = new Map();
+      const menuByName = new Map();
+      menuRows.forEach((row) => {
+        if (!row?.id) return;
+        menuById.set(row.id, row);
+        const normalized = normalizeMenuName(row.name);
+        if (normalized && !menuByName.has(normalized)) {
+          menuByName.set(normalized, row);
+        }
+      });
+
+      const invalidItems = [];
+      const normalizedItems = items.map((item, index) => {
+        const menuItemId = item?.menu_item_id || item?.menuItemId || null;
+        const name = item?.name || "";
+        let matchedMenuItem = null;
+        if (menuItemId && menuById.has(menuItemId)) {
+          matchedMenuItem = menuById.get(menuItemId);
+        } else if (!menuItemId && name) {
+          matchedMenuItem = menuByName.get(normalizeMenuName(name)) || null;
+        }
+
+        if (!matchedMenuItem) {
+          invalidItems.push({
+            index,
+            name: name || null,
+            menu_item_id: menuItemId || null,
+          });
+          return null;
+        }
+
+        const menuPrice = Number(matchedMenuItem.price);
+        const resolvedPrice = Number.isFinite(menuPrice) ? menuPrice : Number(item?.price || 0);
+        if (!Number.isFinite(resolvedPrice) || resolvedPrice <= 0) {
+          invalidItems.push({
+            index,
+            name: name || matchedMenuItem.name || null,
+            menu_item_id: matchedMenuItem.id || menuItemId || null,
+          });
+          return null;
+        }
+
+        return {
+          ...item,
+          menu_item_id: matchedMenuItem.id,
+          menuItemId: undefined,
+          name: matchedMenuItem.name || name,
+          price: resolvedPrice,
+        };
+      }).filter(Boolean);
+
+      if (invalidItems.length) {
+        const labels = invalidItems
+          .map((entry) => entry.name || entry.menu_item_id || `item ${entry.index + 1}`)
+          .filter(Boolean)
+          .join(", ");
+        return respondError(res, `Menu item not found: ${labels}`, "ITEM_NOT_ON_MENU");
+      }
+
+      const computedTotal = normalizedItems.reduce((sum, item) => {
+        const price = Number(item.price || 0);
+        const quantity = Number(item.quantity || 1);
+        return sum + price * quantity;
+      }, 0);
+
+      updates.items = normalizedItems;
+      updates.total_amount = computedTotal;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(parameters, "total_amount") ||
+        Object.prototype.hasOwnProperty.call(body || {}, "total_amount")) {
+      const total = Number(parameters.total_amount ?? body?.total_amount);
+      if (!Number.isFinite(total)) {
+        return respondError(res, "total_amount must be numeric", "BAD_REQUEST");
+      }
+      updates.total_amount = total;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(parameters, "estimated_time") ||
+        Object.prototype.hasOwnProperty.call(body || {}, "estimated_time")) {
+      updates.estimated_time = parameters.estimated_time ?? body?.estimated_time ?? null;
+    }
+
+    if (!Object.keys(updates).length) {
+      return respondError(res, "No updatable fields provided", "BAD_REQUEST");
+    }
+
+    updates.updated_at = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from("orders")
+      .update(updates)
+      .eq("id", order.id)
+      .eq("restaurant_id", restaurantId)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+
+    return res.json({
+      success: true,
+      order: data,
+      order_id: orderId || order.id,
+      customer_phone: customerPhone || data?.customer_phone || null,
+    });
+  } catch (error) {
+    return respondError(res, error.message, "SERVER_ERROR");
+  }
+}
+
+export async function toolCancelOrder(req, res) {
+  try {
+    const parameters = extractParameters(req);
+    const body = normalizeRequestBody(req);
+    const { restaurantId } = await resolveRestaurantContext(req, parameters.restaurant_id);
+    if (!restaurantId) {
+      return respondError(res, "restaurant_id could not be resolved", "BAD_REQUEST");
+    }
+
+    const { order, orderId, customerPhone } = await resolveOrderForAction({
+      restaurantId,
+      parameters,
+      body,
+    });
+    if (!order) {
+      return respondError(res, "Order not found", "NOT_FOUND");
+    }
+
+    const { data, error } = await supabase
+      .from("orders")
+      .update({ status: "cancelled", updated_at: new Date().toISOString() })
+      .eq("id", order.id)
+      .eq("restaurant_id", restaurantId)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+
+    return res.json({
+      success: true,
+      order: data,
+      order_id: orderId || order.id,
+      customer_phone: customerPhone || data?.customer_phone || null,
+    });
   } catch (error) {
     return respondError(res, error.message, "SERVER_ERROR");
   }

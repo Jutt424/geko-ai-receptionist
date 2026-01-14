@@ -27,6 +27,8 @@ import {
   toolCreateReservation,
   toolPlaceOrder,
   toolGetOrderStatus,
+  toolUpdateOrder,
+  toolCancelOrder,
 } from "../controllers/retellRestaurantToolsController.js";
 
 const router = Router();
@@ -43,6 +45,8 @@ router.post("/functions/check_table_availability", toolCheckTableAvailability);
 router.post("/functions/create_reservation", toolCreateReservation);
 router.post("/functions/place_order", toolPlaceOrder);
 router.post("/functions/get_order_status", toolGetOrderStatus);
+router.post("/functions/update_order", toolUpdateOrder);
+router.post("/functions/cancel_order", toolCancelOrder);
 
 /**
  * Create and Update Agent API APIs and their prerequisits
