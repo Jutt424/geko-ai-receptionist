@@ -11,6 +11,7 @@ import {
   updateAgentPrompt,
   updateAgentProperties,
   handleCallEvent,
+  handleInboundCallWebhook,
   playVoice,
 } from "../controllers/retellWebhookController.js";
 import {
@@ -31,6 +32,7 @@ import {
 const router = Router();
 // router.post("/agents", createAgentForClinic);
 router.post("/webhooks/call-events", handleCallEvent);
+router.post("/webhooks/inbound-call", handleInboundCallWebhook);
 router.post("/functions/get_patient_by_phone", toolGetPatientByPhone);
 router.post("/functions/find_slots", toolFindSlots);
 router.post("/functions/create_appointment", toolCreateAppointment);

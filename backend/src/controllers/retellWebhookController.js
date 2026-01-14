@@ -17,6 +17,51 @@ const CALL_WEBHOOK_URL = PUBLIC_BASE ? `${PUBLIC_BASE}/retell/webhooks/call-even
 const withWebhook = (payload = {}) =>
   CALL_WEBHOOK_URL ? { webhook_url: CALL_WEBHOOK_URL, ...payload } : payload;
 
+const normalizeDigits = (value = "") => String(value || "").replace(/\D+/g, "");
+const buildPhoneCandidates = (phone) => {
+  if (typeof phone !== "string") return [];
+  const trimmed = phone.trim();
+  const digits = normalizeDigits(trimmed);
+  const candidates = new Set();
+  if (trimmed) candidates.add(trimmed);
+  if (digits) {
+    candidates.add(digits);
+    candidates.add(`+${digits}`);
+    if (digits.length === 10) {
+      candidates.add(`+1${digits}`);
+    }
+    if (digits.length === 11 && digits.startsWith("1")) {
+      const stripped = digits.slice(1);
+      candidates.add(stripped);
+      candidates.add(`+${stripped}`);
+    }
+  }
+  return Array.from(candidates);
+};
+const maybeSingle = async (queryPromise) => {
+  const { data, error } = await queryPromise;
+  if (error && error.code !== "PGRST116") {
+    throw new Error(error.message);
+  }
+  return data || null;
+};
+const GENERIC_NAME_VALUES = new Set([
+  "guest",
+  "caller",
+  "customer",
+  "unknown",
+  "n/a",
+  "na",
+  "none",
+  "not provided",
+  "not available",
+]);
+const isGenericName = (value) => {
+  if (!value) return true;
+  const normalized = String(value).trim().toLowerCase();
+  return !normalized || GENERIC_NAME_VALUES.has(normalized);
+};
+
 const buildAgentPayload = (agent = {}, llmId, fallbackName = "Agent") => ({
   agent_name: agent.agent_name || fallbackName,
   response_engine: { type: "retell-llm", llm_id: llmId },
@@ -238,6 +283,120 @@ export async function handleCallEvent(req, res) {
     return res.json({ ok: true, call_id: callId });
   } catch (error) {
     return res.status(500).json({ error: error.message });
+  }
+}
+
+export async function handleInboundCallWebhook(req, res) {
+  try {
+    const payload = req.body || {};
+    const callInbound =
+      payload.call_inbound ||
+      payload.data?.call_inbound ||
+      payload.detail?.call_inbound ||
+      payload.call_inbound_data ||
+      {};
+
+    const agentId =
+      callInbound.agent_id ||
+      payload.agent_id ||
+      payload.call?.agent_id ||
+      payload.data?.agent_id ||
+      null;
+    const fromNumber =
+      callInbound.from_number ||
+      payload.from_number ||
+      payload.caller_number ||
+      payload.data?.from_number ||
+      null;
+    const toNumber =
+      callInbound.to_number ||
+      payload.to_number ||
+      payload.called_number ||
+      payload.data?.to_number ||
+      null;
+
+    let restaurant = null;
+    if (agentId) {
+      restaurant = await maybeSingle(
+        supabase
+          .from("restaurants")
+          .select("id, name, phone, agent_id")
+          .eq("agent_id", agentId)
+          .limit(1)
+          .maybeSingle(),
+      );
+    }
+    if (!restaurant && toNumber) {
+      for (const candidate of buildPhoneCandidates(toNumber)) {
+        restaurant = await maybeSingle(
+          supabase
+            .from("restaurants")
+            .select("id, name, phone, agent_id")
+            .eq("phone", candidate)
+            .limit(1)
+            .maybeSingle(),
+        );
+        if (restaurant) break;
+      }
+    }
+
+    if (!restaurant) {
+      return res.json({ call_inbound: {} });
+    }
+
+    let resolvedName = null;
+    if (fromNumber) {
+      const phoneCandidates = buildPhoneCandidates(fromNumber);
+      if (phoneCandidates.length) {
+        const customerRow = await maybeSingle(
+          supabase
+            .from("restaurant_customers")
+            .select("full_name, name, updated_at")
+            .eq("restaurant_id", restaurant.id)
+            .in("phone", phoneCandidates)
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        );
+        resolvedName = customerRow?.full_name || customerRow?.name || null;
+      }
+
+      if (!resolvedName) {
+        const orderRow = await maybeSingle(
+          supabase
+            .from("orders")
+            .select("customer_name, customer_phone, created_at")
+            .eq("restaurant_id", restaurant.id)
+            .in("customer_phone", phoneCandidates)
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        );
+        resolvedName = orderRow?.customer_name || null;
+      }
+    }
+
+    if (isGenericName(resolvedName)) {
+      resolvedName = null;
+    }
+
+    const brandName = restaurant.name || "our restaurant";
+    const agentName = `${brandName} Host`;
+    const openingLine = resolvedName
+      ? `Welcome back, ${resolvedName}! Thanks for calling ${brandName} -- how can I help you?`
+      : `Thank you for calling ${brandName}, this is ${agentName}. How may I help you?`;
+
+    return res.json({
+      call_inbound: {
+        dynamic_variables: {
+          opening_line: openingLine,
+          customer_name: resolvedName || "",
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Inbound call webhook error", error?.message || error);
+    return res.json({ call_inbound: {} });
   }
 }
 

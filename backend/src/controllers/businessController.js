@@ -50,7 +50,10 @@ async function rebuildRestaurantPrompt(restaurant, overrideSettings = {}) {
     settings,
   });
 
-  await retellClient.llm.update(restaurant.llm_id, { general_prompt });
+  await retellClient.llm.update(restaurant.llm_id, {
+    general_prompt,
+    begin_message: "{{opening_line}}",
+  });
   return { updated: true };
 }
 
