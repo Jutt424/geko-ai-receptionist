@@ -27,7 +27,7 @@ const formatHours = (hours = []) => {
       const close = entry.close || entry.close_time || entry.end || "??";
       const closed = entry.closed || entry.is_closed === true;
       if (!day) return null;
-      return `${day}: ${closed ? "Closed" : `${open}–${close}`}`;
+      return `${day}: ${closed ? "Closed" : `${open}-${close}`}`;
     })
     .filter(Boolean)
     .join(" | ");
@@ -50,7 +50,7 @@ const formatMenuHighlights = (menu = []) => {
     const name = item.name || "Dish";
     const price = toCurrency(item.price ?? item.default_price);
     const category = item.category || "Chef's selection";
-    return `${name} (${category}) — ${price}`;
+    return `${name} (${category}) - ${price}`;
   });
   if (highlights.length) {
     return highlights.join("; ");
