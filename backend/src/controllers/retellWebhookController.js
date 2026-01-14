@@ -298,6 +298,7 @@ export async function handleInboundCallWebhook(req, res) {
 
     const agentId =
       callInbound.agent_id ||
+      callInbound.override_agent_id ||
       payload.agent_id ||
       payload.call?.agent_id ||
       payload.data?.agent_id ||
@@ -341,38 +342,62 @@ export async function handleInboundCallWebhook(req, res) {
     }
 
     if (!restaurant) {
-      return res.json({ call_inbound: {} });
+      console.info("Inbound webhook: restaurant not resolved", {
+        agentId,
+        fromNumber,
+        toNumber,
+        callInboundKeys: Object.keys(callInbound || {}),
+        payloadKeys: Object.keys(payload || {}),
+      });
     }
 
     let resolvedName = null;
+    let fallbackRestaurantId = restaurant?.id || null;
     if (fromNumber) {
       const phoneCandidates = buildPhoneCandidates(fromNumber);
       if (phoneCandidates.length) {
-        const customerRow = await maybeSingle(
-          supabase
-            .from("restaurant_customers")
-            .select("full_name, name, updated_at")
-            .eq("restaurant_id", restaurant.id)
-            .in("phone", phoneCandidates)
-            .order("updated_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-        );
-        resolvedName = customerRow?.full_name || customerRow?.name || null;
+        if (restaurant?.id) {
+          const customerRow = await maybeSingle(
+            supabase
+              .from("restaurant_customers")
+              .select("full_name, name, updated_at")
+              .eq("restaurant_id", restaurant.id)
+              .in("phone", phoneCandidates)
+              .order("updated_at", { ascending: false })
+              .limit(1)
+              .maybeSingle(),
+          );
+          resolvedName = customerRow?.full_name || customerRow?.name || null;
+        }
+
+        if (!resolvedName) {
+          const customerRow = await maybeSingle(
+            supabase
+              .from("restaurant_customers")
+              .select("restaurant_id, full_name, name, updated_at")
+              .in("phone", phoneCandidates)
+              .order("updated_at", { ascending: false })
+              .limit(1)
+              .maybeSingle(),
+          );
+          resolvedName = customerRow?.full_name || customerRow?.name || null;
+          fallbackRestaurantId = fallbackRestaurantId || customerRow?.restaurant_id || null;
+        }
       }
 
       if (!resolvedName) {
-        const orderRow = await maybeSingle(
-          supabase
-            .from("orders")
-            .select("customer_name, customer_phone, created_at")
-            .eq("restaurant_id", restaurant.id)
-            .in("customer_phone", phoneCandidates)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
-        );
+        const orderQuery = supabase
+          .from("orders")
+          .select("restaurant_id, customer_name, customer_phone, created_at")
+          .in("customer_phone", phoneCandidates)
+          .order("created_at", { ascending: false })
+          .limit(1);
+        if (restaurant?.id) {
+          orderQuery.eq("restaurant_id", restaurant.id);
+        }
+        const orderRow = await maybeSingle(orderQuery);
         resolvedName = orderRow?.customer_name || null;
+        fallbackRestaurantId = fallbackRestaurantId || orderRow?.restaurant_id || null;
       }
     }
 
@@ -380,7 +405,18 @@ export async function handleInboundCallWebhook(req, res) {
       resolvedName = null;
     }
 
-    const brandName = restaurant.name || "our restaurant";
+    if (!restaurant && fallbackRestaurantId) {
+      restaurant = await maybeSingle(
+        supabase
+          .from("restaurants")
+          .select("id, name, phone, agent_id")
+          .eq("id", fallbackRestaurantId)
+          .limit(1)
+          .maybeSingle(),
+      );
+    }
+
+    const brandName = restaurant?.name || "our restaurant";
     const agentName = `${brandName} Host`;
     const openingLine = resolvedName
       ? `Welcome back, ${resolvedName}! Thanks for calling ${brandName} -- how can I help you?`
