@@ -116,8 +116,7 @@ const buildRestaurantTools = ({ baseUrl, secret }) => ([
     parameter_type: "json",
     args_at_root: false,
     headers: { "x-retell-secret": secret },
-    speak_during_execution: true,
-    execution_message_description: "Let me check our guest list.",
+    speak_during_execution: false,
     speak_after_execution: true,
     timeout_ms: 120000,
     parameters: {
