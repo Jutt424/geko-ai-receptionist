@@ -360,27 +360,27 @@ export async function handleInboundCallWebhook(req, res) {
           const customerRow = await maybeSingle(
             supabase
               .from("restaurant_customers")
-              .select("full_name, name, updated_at")
+              .select("full_name, updated_at")
               .eq("restaurant_id", restaurant.id)
               .in("phone", phoneCandidates)
               .order("updated_at", { ascending: false })
               .limit(1)
               .maybeSingle(),
           );
-          resolvedName = customerRow?.full_name || customerRow?.name || null;
+          resolvedName = customerRow?.full_name || null;
         }
 
         if (!resolvedName) {
           const customerRow = await maybeSingle(
             supabase
               .from("restaurant_customers")
-              .select("restaurant_id, full_name, name, updated_at")
+              .select("restaurant_id, full_name, updated_at")
               .in("phone", phoneCandidates)
               .order("updated_at", { ascending: false })
               .limit(1)
               .maybeSingle(),
           );
-          resolvedName = customerRow?.full_name || customerRow?.name || null;
+          resolvedName = customerRow?.full_name || null;
           fallbackRestaurantId = fallbackRestaurantId || customerRow?.restaurant_id || null;
         }
       }
